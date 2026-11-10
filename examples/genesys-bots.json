@@ -1,0 +1,15 @@
+{
+  "chatBots": [
+    {
+      "id": "qa-assistant",
+      "name": "Copilot customer knowledge",
+      "versions": [
+        {
+          "version": "v1",
+          "supportedLanguages": ["en-us"],
+          "intents": []
+        }
+      ]
+    }
+  ]
+}

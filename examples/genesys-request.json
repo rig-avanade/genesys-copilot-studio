@@ -1,0 +1,13 @@
+{
+  "botId": "qa-assistant",
+  "botName": "Copilot customer knowledge",
+  "botVersion": "v1",
+  "integrationId": "YOUR-GENESYS-INTEGRATION-ID",
+  "botSessionId": "example-bot-session",
+  "conversationId": "example-genesys-conversation",
+  "languageCode": "en-US",
+  "inputMessage": {
+    "type": "Text",
+    "text": "What are your opening hours?"
+  }
+}
