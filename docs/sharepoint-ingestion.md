@@ -13,7 +13,9 @@ Search. Customers still do not need Microsoft sign-in.
 
 1. Open the SharePoint site you intend to use.
 2. Open its document library, commonly called **Documents**.
-3. Select **New > Folder**, name it `CustomerApproved`, and create it.
+3. If you do not already have an approved folder, select **New > Folder**, name
+   it `CustomerApproved`, and create it. An existing folder such as
+   `KnowledgeBase` is also fine; use its actual name in the requests below.
 4. Put one small, text-based PDF or DOCX into the folder. Use a harmless test
    document with an easily recognized sentence, for example:
    "The example support desk opens at 09:00 on weekdays."
@@ -64,14 +66,54 @@ site until step 4.
 
 ## 3. Find the site, document-library, and folder IDs
 
-Use [Microsoft Graph Explorer](https://developer.microsoft.com/graph/graph-explorer)
-with an authorized administrator/operator account. This is a separate tool from
-the Azure portal. Sign in to the correct Microsoft tenant.
+### 3.1 Sign in and check Graph Explorer consent first
 
-Graph Explorer uses its own delegated permissions. Its default sign-in may not
-have permission to perform these reads; if a request is denied, use its **Modify
-permissions** panel and your organization's approval process. Do not confuse
-these operator permissions with the ingester's application permissions.
+Use [Microsoft Graph Explorer](https://developer.microsoft.com/graph/graph-explorer)
+with the **same work/school account that can open the approved folder in
+SharePoint**. Make sure you are signed in to your organization's tenant, not
+using Graph Explorer's sample account.
+
+Graph Explorer has its own **delegated permissions**: consent lets this tool act
+on behalf of your signed-in user. This is neither an Azure IAM role nor the
+ingestion application's `Sites.Selected` consent. Grants made to the ingester
+do not automatically authorize Graph Explorer.
+
+Before trying different folder names or recreating a library:
+
+1. Select the GET request you want to run.
+2. Open **Modify permissions** below the request area.
+3. Review the read permission appropriate to that request:
+
+| Request | Documented least-privileged delegated permission |
+|---|---|
+| Resolve a SharePoint site by its URL | `Sites.Read.All` |
+| Retrieve a drive item/folder by path | `Files.Read` |
+
+4. If the required access has not been consented, select **Consent**, review the
+   prompt, and approve it only if organizational policy permits.
+5. If you see **Need admin approval**, have the tenant administrator approve the
+   required permission for Graph Explorer, or have an authorized administrator
+   perform the lookup. Do not weaken tenant policy.
+6. Retry the request. If consent was just granted and it still returns 403, sign
+   out of Graph Explorer, sign back in to the same account, and retry with a
+   fresh token.
+
+An already approved broader read permission can cover a request; you do not
+need to add duplicate grants mechanically. For example, the folder API also
+supports delegated `Sites.Read.All`. Consent does not give the signed-in user
+access to a SharePoint site they otherwise cannot read.
+
+**Do not use `Files.ReadWrite.AppFolder` as the recommended fix.** That permission
+is for the application's special app folder, not an arbitrary SharePoint folder
+named `CustomerApproved` or `KnowledgeBase`. It also includes write access that
+this lookup does not need. A request succeeding after a consent change does not
+prove which granted permission authorized it.
+
+If a direct folder request returns **403 Forbidden**, investigate this account,
+consent, and SharePoint access before changing the folder path. Do not add
+broad application permissions to the separate ingester to fix Graph Explorer.
+
+### 3.2 Resolve the site ID
 
 1. Set the request method to **GET** and API version to **v1.0**.
 2. Enter the following URL, replacing the hostname and site path, and select
@@ -83,31 +125,106 @@ https://graph.microsoft.com/v1.0/sites/contoso.sharepoint.com:/sites/CustomerSup
 
 3. In the JSON response, copy the complete `id` value as `SITE_ID`. It can contain
    a hostname and comma-separated GUIDs; keep the whole value.
-4. Run this request using that ID:
-
-```text
-https://graph.microsoft.com/v1.0/sites/SITE_ID/drives
-```
-
-5. In `value`, find the document library containing `CustomerApproved`. Copy that
-   library's `id` as `SHAREPOINT_DRIVE_ID`. Do not choose a different library just
-   because its display name is similar.
-6. Run:
-
-```text
-https://graph.microsoft.com/v1.0/drives/DRIVE_ID/root:/CustomerApproved
-```
-
-7. Copy the returned folder's `id` as `SHAREPOINT_FOLDER_ID`. Confirm the response
-   has a `folder` property.
-8. Save `SHAREPOINT_HOST` as only the hostname, such as
+4. Save `SHAREPOINT_HOST` as only the hostname, such as
    `contoso.sharepoint.com`, without `https://` or a path.
 
-For a nested folder, use its path relative to the selected library's root.
-URL-encode spaces as `%20`. A sharing link or browser address is not a folder ID.
+A SharePoint browser URL is not the site ID. For example:
+
+```text
+https://contoso.sharepoint.com/sites/CustomerSupport/Shared%20Documents/Forms/AllItems.aspx?id=...
+```
+
+In that URL, the site is `/sites/CustomerSupport`; `Shared Documents` is the
+library's URL path, and `Forms/AllItems.aspx` is a browser view. Do not include
+the library or view in the site-resolution request. A `viewid` in the browser
+URL is not a site, drive, or folder ID.
+
+### 3.3 For a folder in the default Documents library: retrieve it directly
+
+This is the simplest path when you created the folder under the site's default
+**Documents** library, often shown in browser URLs as **Shared Documents**.
+You do not need to enumerate `/drives` or `/lists` first.
+
+1. Replace `SITE_ID` below with the complete value returned in step 3.2. Do not
+   leave the placeholder literally in the URL.
+2. Run this **GET** for the guide's example folder:
+
+```text
+https://graph.microsoft.com/v1.0/sites/SITE_ID/drive/root:/CustomerApproved?$select=id,name,webUrl,parentReference,folder
+```
+
+If your folder is named **KnowledgeBase**, use this instead:
+
+```text
+https://graph.microsoft.com/v1.0/sites/SITE_ID/drive/root:/KnowledgeBase?$select=id,name,webUrl,parentReference,folder
+```
+
+`/drive` is singular and refers to the site's default document library. Do not
+add `Documents` or `Shared Documents` after `root:/`; you are already inside
+that library.
+
+3. Expect HTTP 200 and a **single JSON object**, not a `value` array. Its relevant
+   fields will resemble:
+
+```json
+{
+  "id": "FOLDER-ID",
+  "name": "KnowledgeBase",
+  "webUrl": "https://contoso.sharepoint.com/sites/CustomerSupport/Shared%20Documents/KnowledgeBase",
+  "parentReference": {
+    "driveId": "DRIVE-ID"
+  },
+  "folder": {}
+}
+```
+
+4. Confirm `name` and `webUrl` point to the approved folder and a `folder`
+   property is present. If the default library is not the one you intended,
+   use step 3.4 instead of accepting unrelated IDs.
+5. Save the top-level `id` as `SHAREPOINT_FOLDER_ID`.
+6. Save `parentReference.driveId` as `SHAREPOINT_DRIVE_ID`.
+
+Do not use `parentReference.id` as the approved folder's ID; that is the parent.
+For nested folders, use the path relative to the library root, such as
+`root:/Policies/CustomerApproved`. Encode spaces as `%20`, for example
+`root:/Agent%20Knowledge`.
+
+### 3.4 Only for a non-default document library
+
+Skip this subsection if step 3.3 already returned the correct folder.
+
+1. With the appropriate Graph Explorer consent, run:
+
+```text
+https://graph.microsoft.com/v1.0/sites/SITE_ID/drives?$select=id,name,webUrl
+```
+
+2. Find the library by its `webUrl`, not only its display name. If the response
+   contains `@odata.nextLink`, follow that exact URL to inspect additional pages.
+3. Copy the matching library's `id` as `SHAREPOINT_DRIVE_ID`.
+4. Request the folder inside that library, replacing both the drive ID and the
+   example folder name as needed:
+
+```text
+https://graph.microsoft.com/v1.0/drives/DRIVE_ID/root:/CustomerApproved?$select=id,name,webUrl,parentReference,folder
+```
+
+5. Verify the returned `webUrl` and `folder` property, then save the top-level
+   `id` as `SHAREPOINT_FOLDER_ID`.
+
+An empty `"value": []` from `/drives` or `/lists` does not prove that the site
+contains no documents or that you should recreate folders. Confirm the site ID,
+Graph Explorer's signed-in account and consent, and pagination first. For the
+default Documents library, use the direct request in step 3.3; its HTTP status
+can reveal an authorization problem that an empty collection did not explain.
 
 **Check before continuing:** you have three distinct IDs: site, drive, and
 folder. The runtime needs the drive/folder IDs; the site ID is used for the grant.
+
+Microsoft references:
+[get a site](https://learn.microsoft.com/en-us/graph/api/site-get?view=graph-rest-1.0),
+[get a folder/drive item](https://learn.microsoft.com/en-us/graph/api/driveitem-get?view=graph-rest-1.0),
+and [AppFolder permission scope](https://learn.microsoft.com/en-us/graph/permissions-reference#filesreadwriteappfolder).
 
 ## 4. Grant the application read access to that site
 
@@ -276,7 +393,9 @@ must be resolved; the command does not silently skip them.
 
 | Symptom | Likely place to check |
 |---|---|
-| Graph HTTP 403 | Application permission type, admin consent, and selected-site read grant |
+| Graph Explorer HTTP 403 during ID lookup | Same work/school account as SharePoint, request-specific delegated consent in Modify permissions, and a fresh sign-in after consent changes |
+| Empty `value` from `/drives` or `/lists` | Verify site/account/consent and pagination; for the default Documents library, try the direct folder request in step 3.3 |
+| Ingestion command's Graph HTTP 403 | The ingester's application permission type, admin consent, and selected-site read grant; Graph Explorer consent does not authorize this application |
 | Graph HTTP 404 | Correct drive/folder IDs and whether the identity can see that site |
 | Storage HTTP 403 | Both container grants for the ingestion app; firewall rules |
 | Search HTTP 403 | Search Service Contributor on the ingestion app and RBAC mode |
