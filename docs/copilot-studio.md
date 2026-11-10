@@ -1,115 +1,220 @@
-# Copilot Studio configuration
+# Walkthrough 4: Connect and configure the Copilot Studio agent
 
-Use a development copy/version of the existing published agent first. Its
-language support, licensing, environment policies, and external API permissions
-remain tenant prerequisites. None of these settings are changed by compiling Go.
+This configures your **existing** agent; it does not create another chatbot in Go.
+Use a development copy/version first so that you do not change a live agent's
+authentication, knowledge, or topics accidentally.
 
-## 1. Keep customer sign-in separate from backend credentials
+**If the App Service guide sent you here:** complete steps 1-2, save the endpoint
+and secret securely, and return there. Steps 3 onward require a healthy deployed
+middleware and indexed test documents.
 
-For this customer-approved corpus, the agent can use **No authentication** for
-customers. Remove/disable its native SharePoint knowledge source for this flow:
-that source would depend on the caller's Microsoft identity and SharePoint access.
+Portal labels can vary by tenant and authoring experience. If your environment
+does not expose a described capability, confirm availability with its Power
+Platform administrator rather than substituting an unrelated connection.
 
-The retrieval tool must use a **maker/owner-provided backend connection**, not an
-end-user OAuth connection. Customers must not be prompted to connect to Azure or
-SharePoint. Have the Power Platform admin confirm that this authentication model
-and the middleware endpoint are allowed by the environment's DLP policies.
+## 1. Prepare the customer-facing agent
 
-## 2. Establish the Direct Line connection
+1. Open [Copilot Studio](https://copilotstudio.microsoft.com).
+2. Select the intended Power Platform **environment**, then open your agent.
+3. Confirm this is the development agent/version you intend to change.
+4. Open **Settings > Security > Authentication**.
+5. Select **No authentication** and save. This applies to customers; it does not
+   make the middleware's APIs or Azure resources anonymous.
+6. Open the agent's **Knowledge** page. Identify the existing SharePoint source.
+7. Remove/disable that native source from the development agent's customer-facing
+   route. Do not retain it as a hidden fallback: native SharePoint retrieval may
+   prompt for a user's Microsoft identity.
+8. Have your administrator confirm that the environment's DLP policies and
+   licensing allow a custom connector/agent flow to the middleware hostname.
 
-In the published agent's web/custom-app connection and web-channel security
-settings, enable the secured Direct Line channel and obtain its web-channel
-secret. Store that value as `DIRECT_LINE_SECRET` in Key Vault.
+The replacement path is approved SharePoint files -> Azure AI Search -> the
+backend retrieval tool. Customers never need a SharePoint connection.
 
-Set `DIRECT_LINE_ENDPOINT` to the correct regional Direct Line v3 base URL
-ending in `/v3/directline`, as provided for the agent/environment. The public
-global endpoint is `https://directline.botframework.com/v3/directline`; use the
-appropriate regional endpoint where required. Do not substitute a Power
-Platform token-issuance URL for the Direct Line base URL.
+**Check before continuing:** the development agent uses No authentication and
+does not rely on native SharePoint retrieval for this flow.
 
-This implementation uses the web-channel secret server-to-server. It does not
-implement delegated Microsoft user authentication, interactive OAuth cards,
-an anonymous public token broker, or an Agents SDK connection. If your tenant
-does not expose/allow this secured channel for the agent, stop and resolve the
-connection model before deployment.
+## 2. Obtain the secured Direct Line connection details
 
-Validate that the secret/base URL pair can start a conversation with the correct
-published agent. Publishing and web-channel access are distinct from a
-successful conversation in Copilot Studio's authoring test pane.
+1. Open the agent's **Publish** page and publish the intended development version
+   if it has not been published yet.
+2. Open **Settings > Security > Web channel security**. Depending on the UI,
+   web/custom-app connection details may also be reached from **Channels**.
+3. Enable **Require secured access** for the channel and save, if it is not
+   already enabled.
+4. Copy one of the channel's secret values to an approved secret manager.
+   This is the value for Key Vault secret `direct-line-secret`.
+5. Find the agent/environment's Direct Line endpoint in its custom/web-app
+   connection guidance. Save the **Direct Line v3 base URL** separately as
+   `DIRECT_LINE_ENDPOINT`.
 
-## 3. Add the approved-knowledge retrieval tool
+The global base URL is `https://directline.botframework.com/v3/directline`.
+Use the correct regional endpoint when required for your environment. Do not
+infer the region from the country in your email address or from a Genesys region.
+A Power Platform **token endpoint**, a demo website URL, and a Direct Line
+**base URL** are different things; the middleware requires the latter.
 
-1. Import [`api/knowledge.openapi.json`](../api/knowledge.openapi.json) as a Power
-   Platform custom connector in the agent's environment.
-2. Replace `YOURAPP.azurewebsites.net` with the deployed middleware hostname.
-3. In the connector's API-key security configuration, keep header `X-API-Key`.
-   Create an owner connection containing `KNOWLEDGE_API_KEY`. Do not put that
-   value into a topic, OpenAPI file, prompt, source-controlled solution, or user
-   message.
-4. Add `SearchApprovedKnowledge` as a tool/action that uses that owner connection.
-   If your tenant's tool configuration cannot share a maker connection for an
-   unauthenticated agent, use an agent flow with its owner's connector connection:
-   accept a `query` text input, invoke the connector, and return the response as
-   `resultsJson` text. Do not switch to end-user credentials as a workaround.
-5. Test the connector: `{"query":"a known document question"}` should return an
-   array such as `[{"Content":"approved excerpt","Title":"guide.pdf"}]`.
-   Unauthorized credentials should produce 401; an unavailable Search backend
-   should produce 502, not an empty array.
+This middleware uses a web-channel secret server-to-server. It does not use a
+Microsoft customer access token, delegated OAuth, or an Agents SDK connection.
+If the secured channel/secret is unavailable in your tenant, stop and resolve
+that connection model before attempting deployment.
 
-When using the agent-flow variant, return the connector array serialized as
-JSON and parse it in the topic using **Parse value** into a table with text
-fields `Content` and `Title`. Save the table as `Topic.KnowledgeResults`.
-For a direct connector action, save its typed response array to that variable.
-The tenant-specific action/flow/connection IDs are deliberately not hardcoded in
-this repository.
+**Check before continuing:** you have the secret securely stored and the correct
+HTTPS base URL ending in `/v3/directline`. Never paste the secret into chat,
+source files, browser JavaScript, or the Genesys incoming credential.
 
-## 4. Ground the answer, rather than just adding a tool
+If following the App Service walkthrough, return to its
+[Key Vault step](app-service.md#62-prepare-and-enter-the-secret-values) now.
 
-Configure the Q&A/Conversational boosting topic to:
+## 3. Create the protected knowledge connector
 
-1. Produce a self-contained retrieval question using the current question and
-   relevant conversation context. Passing only "What about the second option?"
-   will not make keyword search conversational.
-2. Invoke the retrieval action with that question.
-3. If the result table is empty, send a clear "I couldn't find that information
-   in the approved documents" response.
-4. Otherwise, add **Create generative answers**. Set its question input to the
-   user's question and its custom data/search results to
-   `Topic.KnowledgeResults`. Disable other knowledge sources and general-model/
-   web-search fallback for this customer-facing flow.
-5. Send the grounded answer exactly once. If using the node's automatic message
-   output, do not add another message node that duplicates it.
-   If generation produces no answer (including moderation or insufficient
-   evidence), send a clear no-answer message rather than completing an empty turn.
-6. Emit the completion event described below after the final message in **both**
-   the answered and no-match branches.
+The connector gives Power Platform a description of our `/knowledge/search`
+API. Its connection stores the API key separately from the topic definition.
 
-In topic code, the supported custom-data binding is:
+1. Confirm `https://YOUR-APP-HOSTNAME/healthz` returns `{"status":"ok"}` and the
+   Search index contains your test document.
+2. Open the Power Platform maker portal, such as
+   [Power Apps](https://make.powerapps.com), in the **same environment** as the agent.
+3. Open **Custom connectors**. If hidden from the main menu, use
+   **More > Discover all** to find it.
+4. Select **New custom connector > Import an OpenAPI file**.
+5. Name it `CustomerApprovedKnowledge` and select this repository's
+   [`api/knowledge.openapi.json`](../api/knowledge.openapi.json).
+6. In **General**, replace `YOURAPP.azurewebsites.net` with the actual App Service
+   hostname copied from Azure. Keep scheme **HTTPS** and base URL `/`.
+   The Host field contains the hostname, not `https://` or `/knowledge/search`.
+7. In **Security**, confirm authentication type **API Key**, parameter name
+   `X-API-Key`, and parameter location **Header**.
+8. In **Definition**, confirm operation `SearchApprovedKnowledge` is a POST to
+   `/knowledge/search`, accepts a `query` string, and returns an array with
+   `Content` and `Title` fields.
+9. Select **Create connector** or **Update connector**, as appropriate.
+10. Open the connector's **Test** page and select **New connection**.
+11. Enter the raw value of `knowledge-api-key` from Key Vault. Do not prefix it
+    with `Bearer`, and do not enter the Genesys or Direct Line secret.
+12. Return to the test page, select that connection, enter a known question such
+    as `When does the example support desk open?`, and run the operation.
+
+Expect HTTP 200 and a result resembling:
+
+```json
+[
+  {
+    "Content": "The example support desk opens at 09:00 on weekdays.",
+    "Title": "support-hours.pdf"
+  }
+]
+```
+
+An empty array means no matching indexed content. HTTP 401 means the connector
+credential is wrong; HTTP 502 means the backend retrieval failed. These are not
+interchangeable results.
+
+**Check before continuing:** the connector retrieves the test excerpt using its
+stored owner connection. No customer has supplied credentials.
+
+## 4. Expose retrieval to the agent using an owner connection
+
+Use the following agent-flow path when you need an explicit owner-authenticated
+connection for an unauthenticated customer-facing agent. If you already have a
+working direct connector tool with maker-provided authentication and a typed
+table output, you may use that instead and skip JSON parsing in step 5.
+
+1. In Copilot Studio, open **Tools** and choose to add a new **agent flow**.
+   In environments exposing flow creation through Power Automate, create it in
+   the same environment with trigger **When an agent calls the flow**.
+2. On the trigger, add a **Text** input named `query`.
+3. Add an action, find `CustomerApprovedKnowledge`, and select
+   **SearchApprovedKnowledge**.
+4. Choose the connection created in step 3. Its credential belongs to the owner,
+   not the customer.
+5. Set the action's `query` field to the trigger's `query` input.
+6. Rename this action to `SearchApprovedKnowledge` so the expression below
+   refers to the correct action name.
+7. Add **Respond to the agent**, with a **Text** output named `resultsJson`.
+8. Set that output using the expression:
+
+```text
+string(body('SearchApprovedKnowledge'))
+```
+
+9. Save/publish the flow and add it as a tool to the agent if it is not already
+   attached. Give it a clear description: "Retrieve excerpts from customer-approved
+   documents; use a self-contained question including relevant conversation context."
+10. Test it with the same known question. Verify `resultsJson` contains a JSON
+    array, not the entire HTTP response envelope or an extra layer of quoted JSON.
+
+If the tenant requires end-user connections and will not permit this
+owner-connection model, stop and ask the Power Platform administrator. Do not
+work around DLP or switch the customer-facing agent to a shared employee login.
+
+Let failed connector actions fail the flow. Do not configure an error branch
+that returns `"[]"`, because that would disguise an outage as "no matching document."
+
+**Check before continuing:** an agent flow/tool can return the excerpt without
+a customer sign-in prompt.
+
+## 5. Wire retrieval into the Q&A topic
+
+Adding a tool does not automatically make every topic use it. Configure the
+development agent's Q&A/Conversational boosting topic explicitly.
+
+1. Open **Topics** and the topic that handles knowledge questions, commonly
+   **Conversational boosting** under system topics. Confirm it actually handles
+   your test question in the agent's test trace.
+2. Add a tool/action node before answer generation and select the retrieval flow.
+3. For the first explicit-question test, map its `query` input to
+   `System.Activity.Text`. Save the returned text to `Topic.KnowledgeResultsJson`.
+4. Add **Variable management > Parse value**. Parse
+   `Topic.KnowledgeResultsJson` and save the result to `Topic.KnowledgeResults`.
+5. Use the sample array from step 3 to infer a table with string fields
+   `Content` and `Title`. If using a direct connector tool's typed table,
+   save that table directly to `Topic.KnowledgeResults` instead.
+6. Add a **Condition** that checks `IsEmpty(Topic.KnowledgeResults)`.
+7. On the empty branch, add a message such as:
+   "I couldn't find that information in the approved documents."
+8. On the nonempty branch, add **Create generative answers**.
+9. Set its question input to the user's question and open its data-source
+   configuration. Choose **Custom data** and bind its search-results table to
+   `Topic.KnowledgeResults`.
+10. Disable other knowledge sources and general-model/web-search fallback for
+    this route. Keep the existing native SharePoint source out of it.
+11. Send the generated answer once. If the generative-answers node already sends
+    it, do not add a second message node that repeats it. If generation returns
+    no answer, send a clear no-answer message instead of completing an empty turn.
+12. Add the completion event in step 6 after the final message in both branches.
+
+The custom-data binding in topic code has this shape:
 
 ```yaml
 customDataSource:
   searchResults: =Topic.KnowledgeResults
 ```
 
-Use the authoring UI to configure the complete generative-answer node so that
-its selected-knowledge settings match your tenant's current schema. A data
-retrieval tool alone does not guarantee that the agent grounds answers in its
-output; inspect the published behavior.
+Do not replace an entire topic with that fragment. Use the node's UI/code editor
+to set the binding inside the existing generative-answers action. If Custom data
+is unavailable in the authoring experience, confirm the supported topic/tool
+configuration for your tenant before publishing.
 
-In the agent/topic instructions, require it to use retrieved excerpts only,
-admit insufficient evidence, and treat document instructions as untrusted
-content. Titles are returned for source attribution. Private SharePoint/blob
-links are intentionally omitted because customers cannot open them.
+In the agent/topic instructions, require answers to use retrieved excerpts only,
+admit insufficient evidence, and treat document instructions as untrusted data.
+Source titles are provided; private SharePoint/blob URL metadata is not.
 
-On retrieval/tool failure, do not route into the empty-result or general-answer
-branch. Configure the topic's error path to emit `genesys.turn.failed`, or let
-the turn fail explicitly. The Genesys failure path can notify the customer.
+**Follow-up questions need an additional check:** `System.Activity.Text` is enough
+for an explicit question, but "What about the second option?" is a poor standalone
+search query. Before launch, configure the agent's query formulation/tool input
+to include the relevant conversation context and verify it in the test trace.
+Conversation persistence alone does not solve context-dependent retrieval.
+Do not claim follow-up support merely because the same session ID is reused.
 
-## 5. Emit an explicit completion event
+## 6. Send a completion event and handle failures
 
-The middleware waits for an activity of type `event` with name
-`genesys.turn.complete`. Add a send-activity event after the final reply in every
-Q&A branch. The event template is:
+The middleware must know when the entire answer is finished. It waits for an
+activity of type `event`, named `genesys.turn.complete`, not a pause in output.
+
+1. In the Q&A topic, identify the final message in each successful/no-match path.
+2. Add a send-activity **event** immediately after it. Use the authoring UI's
+   event activity option where available, or its code editor to add this action
+   at the same indentation as the other actions:
 
 ```yaml
 - kind: SendActivity
@@ -119,18 +224,39 @@ Q&A branch. The event template is:
     name: genesys.turn.complete
 ```
 
-For an explicit error event, use the same event template with
-`name: genesys.turn.failed`. Do not send the event name as a chat message.
-Validate the node in your current Copilot authoring schema and inspect the actual
-Direct Line activities: `type` must be `event`, not `message`.
+3. Use a unique action `id` for each additional copy in the topic, such as
+   `completeGenesysNoMatch`.
+4. Validate/save the topic. Do not send `genesys.turn.complete` as ordinary
+   message text; it must be an event.
+5. In the retrieval failure/system error path, emit an event named
+   `genesys.turn.failed`, or let the turn fail explicitly. Do not send a normal
+   completion event followed by a general-knowledge answer.
+6. Keep the conversation open after each successful answer. Do not add an
+   end-conversation action after every Q&A response.
+7. Disable unsolicited Conversation Start greetings for this integration's
+   development route, along with handoff/authentication/card-only paths that
+   do not fit the v1 text Q&A contract.
 
-Do not end the entire conversation after each answer. The next Genesys turn must
-reuse it. Disable unsolicited Conversation Start greetings for this integration,
-and remove handoff, authentication, adaptive-card-only, and interactive question
-paths from the v1 Q&A route. Every completed Q&A turn must send at least one text
-reply and its completion event within the connector's time budget.
+**Check before continuing:** all Q&A paths have a final text reply and the proper
+event; failure paths do not pretend to be a grounded answer. The current tenant's
+authoring schema must accept the event action before you publish.
 
-Publish the updated agent. Verify the event and response in a real secured
-Direct Line conversation, not just the authoring test pane. If your tenant cannot
-emit the required event, do not bypass the check with a sleep/quiet timeout;
-resolve and verify a supported completion contract before going live.
+## 7. Publish and verify the actual channel
+
+1. Test the known question in Copilot Studio's test pane. Inspect the trace:
+   retrieval should execute, return approved text, and feed answer generation.
+2. Test an unanswerable question. Confirm the agent admits that the approved
+   documents do not provide the answer.
+3. Test a retrieval failure and verify it is not treated as an empty result.
+4. Publish the updated development agent.
+5. Finish the [Genesys walkthrough](genesys.md#2-configure-the-endpoint-and-credential)
+   and repeat the tests through the secured, published channel.
+6. Verify that real Direct Line traffic contains the text reply followed by
+   `type: event`, `name: genesys.turn.complete`. If the middleware times out,
+   inspect the published topic/event contract as well as network latency.
+
+The authoring test pane is not proof that the published Direct Line channel
+works. If the event cannot be emitted in your tenant, stop and resolve a supported
+completion contract; do not replace it with an arbitrary sleep.
+
+No human-agent handoff or voice is enabled by these steps.

@@ -29,11 +29,26 @@ The middleware's Search identity reads only the resulting customer-facing index.
 
 ## Start here
 
-1. Read [architecture and limitations](docs/architecture.md).
-2. Follow [Azure and SharePoint setup](docs/azure-setup.md).
-3. Configure the [Copilot retrieval topic and Direct Line connection](docs/copilot-studio.md).
-4. Configure [Genesys Bot Connector](docs/genesys.md).
-5. Complete the [acceptance checklist](docs/acceptance.md) before exposing the bot.
+Start with [the Azure portal walkthrough](docs/azure-setup.md). The guides explain
+where to click, example values to enter, what each setting does, and what to
+check before continuing. Provisioning stays portal-based; there is no Terraform
+deployment in this repository.
+
+| Order | Walkthrough | Result |
+|---|---|---|
+| 1 | [Azure AI Search and Storage](docs/azure-setup.md) | Search service, identities/roles, private containers, and an empty index |
+| 2 | [SharePoint ingestion](docs/sharepoint-ingestion.md) | An approved folder indexed and update/deletion behavior checked |
+| 3 | [App Service deployment](docs/app-service.md) | A containerized Go service with private registry access and Key Vault settings |
+| 4 | [Copilot Studio](docs/copilot-studio.md) | An owner-authenticated retrieval tool and grounded Q&A topic |
+| 5 | [Genesys Bot Connector](docs/genesys.md) | A development messaging flow connected to the agent |
+
+The App Service guide will briefly send you to Copilot steps 1-2 for connection
+details and Genesys step 1 to reserve an inactive integration ID, then bring you
+back. Those early steps do not require a healthy middleware or a live channel.
+
+Read [architecture and limitations](docs/architecture.md) for the reasoning behind
+the setup, and complete the [acceptance checklist](docs/acceptance.md) before
+exposing the bot to customers.
 
 The code and local contract tests do not provision resources, publish the agent,
 or prove a live tenant integration. Azure, Copilot, and Genesys setup is required.
