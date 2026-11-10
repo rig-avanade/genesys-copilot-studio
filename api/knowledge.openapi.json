@@ -1,0 +1,68 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "Customer-approved knowledge",
+    "version": "1.0",
+    "description": "Retrieve approved SharePoint document excerpts from Azure AI Search. This API does not generate answers."
+  },
+  "host": "YOURAPP.azurewebsites.net",
+  "basePath": "/",
+  "schemes": ["https"],
+  "consumes": ["application/json"],
+  "produces": ["application/json"],
+  "securityDefinitions": {
+    "KnowledgeApiKey": {
+      "type": "apiKey",
+      "name": "X-API-Key",
+      "in": "header"
+    }
+  },
+  "security": [{"KnowledgeApiKey": []}],
+  "paths": {
+    "/knowledge/search": {
+      "post": {
+        "operationId": "SearchApprovedKnowledge",
+        "summary": "Search customer-approved knowledge",
+        "description": "Returns up to five relevant excerpts. Empty results mean no match; HTTP errors mean retrieval failed and must not be treated as an empty result.",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "type": "object",
+              "required": ["query"],
+              "properties": {
+                "query": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4000,
+                  "description": "A self-contained question, including relevant conversation context."
+                }
+              }
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Approved knowledge excerpts, not a generated answer",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["Content", "Title"],
+                "properties": {
+                  "Content": {"type": "string"},
+                  "Title": {"type": "string"}
+                }
+              }
+            }
+          },
+          "400": {"description": "Invalid query"},
+          "401": {"description": "Invalid backend API credential"},
+          "502": {"description": "Knowledge service unavailable"}
+        }
+      }
+    }
+  }
+}
